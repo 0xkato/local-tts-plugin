@@ -441,6 +441,9 @@
 
   let selectionRange = null;
   let lastPreload = 0;
+  // A setting (the toolbar panel's "Play button" switch): off, a selection
+  // shows nothing and reading starts from the menu or the shortcut instead
+  let bubbleOn = true;
 
   function selectedRange() {
     const sel = getSelection();
@@ -483,7 +486,7 @@
   }
 
   function offerSelection() {
-    const range = selectedRange();
+    const range = bubbleOn ? selectedRange() : null;
     if (!range) {
       hideBubble();
       return;
@@ -688,12 +691,20 @@
     if (!fromStorage) api.runtime.sendMessage({ type: "follow", value: on }).catch(() => {});
   }
 
-  api.storage.local.get({ follow: true }).then((stored) => {
+  function setBubble(on) {
+    bubbleOn = on;
+    if (!on) hideBubble();
+  }
+
+  api.storage.local.get({ follow: true, bubble: true }).then((stored) => {
     follow = stored.follow !== false;
     showFollow();
+    setBubble(stored.bubble !== false);
   }).catch(() => {});
   api.storage.onChanged.addListener((changes, area) => {
-    if (area === "local" && changes.follow) setFollow(changes.follow.newValue !== false, true);
+    if (area !== "local") return;
+    if (changes.follow) setFollow(changes.follow.newValue !== false, true);
+    if (changes.bubble) setBubble(changes.bubble.newValue !== false);
   });
 
   onClick(ui.follow, () => setFollow(!follow));

@@ -7,7 +7,8 @@
 
 const api = globalThis.browser ?? globalThis.chrome;
 const HOST = "local_tts_plugin";
-const DEFAULTS = { engine: null, voices: {}, speed: 1.5, follow: true };
+// bubble: the ▶ button beside a selection (the menu and shortcut work regardless)
+const DEFAULTS = { engine: null, voices: {}, speed: 1.5, follow: true, bubble: true };
 const MISSING =
   "The Local TTS helper isn't installed. Run ./install.sh from the local-tts-plugin folder, then try again.";
 const CRASHED =
@@ -195,6 +196,7 @@ async function saveSettings(change) {
   }
   if ("speed" in change) settings.speed = Math.min(2, Math.max(0.5, Number(change.speed) || 1.5));
   if ("follow" in change) settings.follow = Boolean(change.follow);
+  if ("bubble" in change) settings.bubble = Boolean(change.bubble);
   await api.storage.local.set(settings);
 
   const live = reading && LIVE.includes(reading.state) && port;

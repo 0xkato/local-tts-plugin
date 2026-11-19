@@ -11,7 +11,8 @@ Works in **Firefox**, **Chrome** and **Brave**. The voices come from
 ## Features
 
 - **Read any selection.** A play button appears next to text you highlight.
-  Right-click → *Read aloud* and <kbd>⌥ Option</kbd> <kbd>⇧ Shift</kbd> <kbd>R</kbd> work too.
+  Right-click → *Read aloud* and <kbd>⌥ Option</kbd> <kbd>⇧ Shift</kbd> <kbd>R</kbd> work too, so
+  the button can be switched off when it gets in the way.
 - **Follow along.** The sentence being read is highlighted on the page, and the
   page scrolls with it. Switch that off to look around while it reads.
 - **A small control bar.** Pause, previous and next sentence, speed from 0.5×
@@ -76,6 +77,7 @@ cloned folder is not needed afterwards.
 | Speed | − / + on the bar, or the slider in the toolbar panel |
 | Follow along | The target button on the bar, or the switch in the toolbar panel |
 | Find your place | Click the bar's title to jump to the sentence being read |
+| Hide the play button | The *Play button* switch in the toolbar panel; right-click → *Read aloud* and <kbd>⌥</kbd><kbd>⇧</kbd><kbd>R</kbd> still work |
 | Voice | The toolbar button: pick an engine and a voice |
 
 Reading carries on when you switch tabs, and stops when you close the page.

@@ -78,10 +78,18 @@
       </span>
       <input id="follow" type="checkbox" role="switch" checked>
     </label>
+    <label class="switch-row" for="bubble">
+      <span>
+        <span class="switch-title">Play button</span>
+        <span class="switch-hint">Show <span class="chip">▶</span> beside text you highlight</span>
+      </span>
+      <input id="bubble" type="checkbox" role="switch" checked>
+    </label>
   </section>
 
   <footer>
-    Highlight text on any page and press <span class="chip">▶</span><br>
+    <span id="how">Highlight text on any page and press <span class="chip">▶</span></span>
+    <span id="how-off" hidden>Highlight text, then right-click → <em>Read aloud</em></span><br>
     <kbd>⌥</kbd><kbd>⇧</kbd><kbd>R</kbd> read selection &nbsp;·&nbsp; <kbd>⌥</kbd><kbd>⇧</kbd><kbd>P</kbd> pause
   </footer>
 

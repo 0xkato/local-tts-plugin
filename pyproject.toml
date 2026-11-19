@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "local-tts-plugin"
-version = "0.2.0"
+version = "0.2.1"
 description = "Browser extension helper: reads highlighted text aloud with the local-tts voices."
 readme = "README.md"
 license = { text = "MIT" }

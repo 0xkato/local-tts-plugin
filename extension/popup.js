@@ -57,6 +57,10 @@ function render() {
 
   renderEngines(catalog, settings);
   if (document.activeElement !== $("follow")) $("follow").checked = settings.follow !== false;
+  const bubble = settings.bubble !== false;
+  if (document.activeElement !== $("bubble")) $("bubble").checked = bubble;
+  $("how").hidden = !bubble;
+  $("how-off").hidden = bubble;
   const speed = Number(settings.speed) || 1.5;
   if (document.activeElement !== $("speed")) $("speed").value = String(speed);
   $("speed-value").textContent = `${speed.toFixed(1)}×`;
@@ -138,6 +142,9 @@ $("speed").addEventListener("change", (e) => {
 });
 $("follow").addEventListener("change", (e) => {
   port.postMessage({ type: "settings", follow: e.target.checked });
+});
+$("bubble").addEventListener("change", (e) => {
+  port.postMessage({ type: "settings", bubble: e.target.checked });
 });
 for (const [id, action] of [["prev", "prev"], ["next", "next"], ["stop", "stop"]]) {
   $(id).addEventListener("click", () => port.postMessage({ type: "control", action }));

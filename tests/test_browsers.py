@@ -31,6 +31,7 @@ pytestmark = pytest.mark.skipif(not os.access(register.launcher_path(HOME), os.X
 IDLE_S = 4
 TEST_ENV = dict(LOCAL_TTS_FAKE_VOICES="1", LOCAL_TTS_PLUGIN_FAKE_PLAYER="0.45",
                 LOCAL_TTS_VOICES_PYTHON=sys.executable, LOCAL_TTS_PLUGIN_IDLE_S=str(IDLE_S))
+FIREFOX_UUID = "5b6f0d1e-8c1a-4e8f-9a51-6c0d2f3a7b10"
 
 EXPECTED = [
     "Why it matters",
@@ -107,8 +108,13 @@ def start_firefox(tmp_path_factory):
     options = Options()
     options.binary_location = firefox
     options.add_argument("-headless")
+    # A fixed moz-extension:// address, so a test can open the toolbar panel
+    # (which the test driver only navigates to with system access, below)
+    options.set_preference("extensions.webextensions.uuids",
+                           json.dumps({"local-tts@local-tts-plugin": FIREFOX_UUID}))
     driver = webdriver.Firefox(options=options, service=Service(
-        executable_path=driver_path, env=dict(os.environ, **TEST_ENV)))
+        executable_path=driver_path, service_args=["--allow-system-access"],
+        env=dict(os.environ, **TEST_ENV)))
     driver.install_addon(os.path.join(ROOT, "extension"), temporary=True)
     return driver
 
@@ -323,3 +329,61 @@ def test_a_pause_longer_than_the_helper_waits_keeps_the_place(browser, site):
     result = browser.execute_async_script(WATCH, ["finished", "error"])
     assert result["state"] == "finished", result
     assert result["seen"][0] == EXPECTED[2] and result["seen"][-1] == EXPECTED[-1], result
+
+
+def in_panel(driver, fn):
+    """Runs fn with the toolbar panel open in a tab of its own, then goes back."""
+    page = driver.current_window_handle
+    driver.switch_to.new_window("tab")
+    try:
+        if driver.name == "firefox":
+            driver.get(f"moz-extension://{FIREFOX_UUID}/popup.html")
+        else:
+            driver.get(f"chrome-extension://{register.CHROME_EXTENSION_ID}/popup.html")
+        return fn()
+    finally:
+        driver.close()
+        driver.switch_to.window(page)
+
+
+def flip_play_button(driver, on):
+    switch = wait_for(lambda: driver.find_element("id", "bubble"))
+    # The settings arrive from the background script; set before then, they'd be overwritten
+    wait_for(lambda: driver.find_element("id", "status").get_attribute("data-state"))
+    if switch.is_selected() != on:
+        driver.find_element("css selector", 'label[for="bubble"] .switch-title').click()
+    # The panel's hint changes once the setting is saved
+    wait_for(lambda: driver.find_element("id", "how-off").is_displayed() == (not on))
+    shot(driver, f"panel-play-button-{'on' if on else 'off'}")
+
+
+READ_SELECTION = """
+const done = arguments[arguments.length - 1];
+const api = globalThis.browser ?? globalThis.chrome;
+api.tabs.query({}).then((tabs) => {
+  const tab = tabs.find((t) => (t.url || "").includes(arguments[0]));
+  return api.tabs.sendMessage(tab.id, { type: "read-selection" });
+}).then(() => done(true), (e) => done(String(e)));
+"""
+
+
+def test_the_play_button_can_be_switched_off_from_the_toolbar_panel(browser, site):
+    """Off, highlighting text shows nothing (copying code in peace), while
+    right-click > Read aloud and the shortcut still read the selection."""
+    open_page(browser, f"{site}/article.html?no-button")
+    in_panel(browser, lambda: flip_play_button(browser, False))
+    try:
+        assert not shadow(browser, ".bubble.shown")   # the one showing went away
+        select_story(browser)
+        time.sleep(0.5)
+        assert not shadow(browser, ".bubble.shown")
+        # What the menu item and the shortcut send to the page
+        sent = in_panel(browser, lambda: browser.execute_async_script(READ_SELECTION, "no-button"))
+        assert sent is True, sent
+        result = browser.execute_async_script(WATCH, ["finished", "error"])
+        assert result["state"] == "finished", result
+        assert result["seen"] == EXPECTED
+    finally:
+        in_panel(browser, lambda: flip_play_button(browser, True))
+    select_story(browser)
+    assert wait_for(lambda: shadow(browser, ".bubble.shown"))
