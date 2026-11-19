@@ -3,7 +3,6 @@ import math
 import struct
 import wave
 
-
 from local_tts_plugin.host import FRAME_S, Session, clip_levels
 from tests.fakes import Events, FakeClient, FakeEngine, FakePlayer, spec
 

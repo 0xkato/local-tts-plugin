@@ -53,6 +53,10 @@ on **Developer mode**, click **Load unpacked** and pick
 keeps, with a key in its manifest that fixes the extension's ID — Chrome lets
 the helper talk only to an extension it knows by ID.
 
+Everything the browsers use — the helper, the signed Firefox add-on and the
+Chrome/Brave copy — lives in `~/.local/share/local-tts-plugin`, so this folder
+can move or go. Run `./install.sh` again after pulling changes.
+
 ## Using it
 
 - **Highlight text** and press the ▶ button that appears beside it — or
