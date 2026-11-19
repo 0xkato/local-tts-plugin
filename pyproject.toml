@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Browser extension helper: reads highlighted text with the local-tts voices."
 requires-python = ">=3.10"
 dependencies = [
-    "local-tts @ git+https://github.com/0xkato/local-tts@v1.0.0",
+    "local-tts @ git+https://github.com/0xkato/local-tts@v1.0.1",
 ]
 
 [project.optional-dependencies]
