@@ -13,6 +13,9 @@
   const HIGHLIGHT = "local-tts-sentence";
   const SPEED_MIN = 0.5;
   const SPEED_MAX = 2.0;
+  // Hours of listening, and well inside the browser's 1 MB limit on what the
+  // helper may send back about it
+  const MAX_CHARS = 300000;
   const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 
   // ── Text from the page ────────────────────────────────────────────────
@@ -518,7 +521,8 @@
       api.runtime.sendMessage({ type: "preload" }).catch(() => {});
     }
   });
-  ui.bubble.addEventListener("click", () => {
+  ui.bubble.addEventListener("click", (e) => {
+    if (!e.isTrusted) return;
     const range = selectionRange;
     hideBubble();
     if (range) read(range);
@@ -533,14 +537,17 @@
   async function read(range, startIndex = 0, reuse = null) {
     const doc = reuse || extract(range);
     if (!doc.text.trim()) return;
+    const capped = doc.text.length > MAX_CHARS;
+    if (capped) doc.text = doc.text.slice(0, MAX_CHARS);
     getSelection().removeAllRanges();
     clearTimeout(hideTimer);
     highlight(null);
-    current = { id: null, doc, sentences: null, index: startIndex, total: 0, state: "loading", speed: 1.5 };
+    current = { id: null, doc, sentences: null, index: startIndex, total: 0, state: "loading",
+                speed: 1.5, detached: false };
     early = [];
     ui.mount();
     ui.title.textContent = "Local TTS";
-    render({ state: "loading", message: "Starting…" });
+    render({ state: "loading", message: capped ? "Long selection: reading the first 300,000 characters" : "Starting…" });
     ui.bar.classList.add("shown");
     const mine = current;
     let reply;
@@ -651,10 +658,15 @@
     }
   }
 
-  ui.main.addEventListener("click", () => {
+  // Only real clicks count: a page's own script must not start or steer a reading.
+  const onClick = (element, handler) =>
+    element.addEventListener("click", (e) => { if (e.isTrusted) handler(e); });
+
+  onClick(ui.main, () => {
     if (!current) return;
     const kind = ui.main.dataset.kind;
     if (kind === "pause") control("pause");
+    else if (kind === "play" && current.detached) read(null, current.index, current.doc);
     else if (kind === "play") control("resume");
     else if (kind === "replay") read(null, 0, current.doc);
     else if (kind === "retry") read(null, current.index, current.doc);
@@ -684,13 +696,21 @@
     if (area === "local" && changes.follow) setFollow(changes.follow.newValue !== false, true);
   });
 
-  ui.follow.addEventListener("click", () => setFollow(!follow));
-  ui.meta.addEventListener("click", () => {
+  onClick(ui.follow, () => setFollow(!follow));
+  onClick(ui.meta, () => {
     if (current) showSentence(current.index, true);
   });
-  ui.prev.addEventListener("click", () => control("prev"));
-  ui.next.addEventListener("click", () => control("next"));
-  ui.close.addEventListener("click", () => {
+  // With the helper gone (paused past its idle time), skipping just moves the place
+  const skip = (step) => {
+    if (!current) return;
+    if (!current.detached) return control(step > 0 ? "next" : "prev");
+    current.index = Math.max(0, Math.min(current.total - 1, current.index + step));
+    showSentence(current.index);
+    render({ state: "paused" });
+  };
+  onClick(ui.prev, () => skip(-1));
+  onClick(ui.next, () => skip(1));
+  onClick(ui.close, () => {
     control("stop");
     endReading();
   });
@@ -701,8 +721,8 @@
     ui.value.textContent = `${speed.toFixed(1)}×`;
     api.runtime.sendMessage({ type: "speed", value: speed }).catch(() => {});
   };
-  ui.minus.addEventListener("click", () => nudgeSpeed(-0.1));
-  ui.plus.addEventListener("click", () => nudgeSpeed(0.1));
+  onClick(ui.minus, () => nudgeSpeed(-0.1));
+  onClick(ui.plus, () => nudgeSpeed(0.1));
 
   function control(action) {
     api.runtime.sendMessage({ type: "control", action }).catch(() => {});
@@ -712,6 +732,11 @@
     if (!message) return;
     if (message.type === "host") onHost(message.message);
     else if (message.type === "ended" && current && message.readingId === current.id) endReading();
+    else if (message.type === "detached" && current && message.readingId === current.id) {
+      current.detached = true;
+    } else if (message.type === "restart" && current && current.detached && message.readingId === current.id) {
+      read(null, current.index, current.doc);
+    }
     else if (message.type === "read-selection") {
       const range = selectedRange() || selectionRange;
       hideBubble();

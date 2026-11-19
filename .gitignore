@@ -14,3 +14,6 @@ dist/
 # Packaged extension
 *.xpi
 *.zip
+
+# web-ext sign bookkeeping
+.amo-upload-uuid

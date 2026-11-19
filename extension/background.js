@@ -9,16 +9,21 @@ const api = globalThis.browser ?? globalThis.chrome;
 const HOST = "local_tts_plugin";
 const DEFAULTS = { engine: null, voices: {}, speed: 1.5, follow: true };
 const MISSING =
-  "The Local TTS helper isn't installed. Run ./install.sh in the local-tts-plugin folder, then try again.";
+  "The Local TTS helper isn't installed. Run ./install.sh from the local-tts-plugin folder, then try again.";
 const CRASHED =
   "The Local TTS helper stopped unexpectedly. Details: ~/.local/share/local-tts-plugin/host.log";
+const LIVE = ["loading", "playing", "paused"];
 
 let port = null;
 let host = { state: "idle", message: "" }; // idle | connecting | connected | missing | error
 let catalog = null;
 let lastError = null;
+let engineErrors = {}; // engine key -> why it failed to load
 let sawBye = false;
-let reading = null; // { id, tabId, frameId, state, index, total, message, engineName, voiceLabel, speed }
+// { id, tabId, frameId, state, index, total, message, engineName, voiceLabel, speed, detached }
+// "detached": paused so long that the helper quit to free the model; resuming
+// starts the reading again from the same sentence.
+let reading = null;
 let nextId = Date.now() % 1e9;
 let settings = { ...DEFAULTS };
 const popups = new Set();
@@ -47,6 +52,8 @@ function connect() {
   return port;
 }
 
+// Starts the helper if need be: for what only the helper can do (reading,
+// loading a model, the voice list).
 function toHost(message) {
   const p = connect();
   if (!p) return;
@@ -67,12 +74,17 @@ function disconnected(p) {
   } else {
     host = { state: "error", message: CRASHED };
   }
-  if (reading && ["loading", "playing", "paused"].includes(reading.state)) {
-    const quiet = host.state === "idle" && sawBye;
-    reading.state = quiet ? "stopped" : "error";
-    reading.message = quiet ? null : host.message || CRASHED;
-    toTab({ type: "host", message: { type: "state", readingId: reading.id, state: reading.state,
-                                     message: reading.message, index: reading.index, total: reading.total } });
+  if (reading && LIVE.includes(reading.state)) {
+    if (sawBye && reading.state === "paused") {
+      // Quit to free the model while paused: keep the place, resume restarts
+      reading.detached = true;
+      toTab({ type: "detached", readingId: reading.id });
+    } else {
+      reading.state = "error";
+      reading.message = host.message || CRASHED;
+      toTab({ type: "host", message: { type: "state", readingId: reading.id, state: "error",
+                                       message: reading.message, index: reading.index, total: reading.total } });
+    }
   }
   broadcast();
 }
@@ -89,13 +101,13 @@ function fromHost(message) {
       sawBye = true;
       return;
     case "ready":
+      delete engineErrors[message.engine];
       break;
     case "error":
-      lastError = message.message;
-      if (reading && !message.engine) {
-        toTab({ type: "host", message: { type: "state", readingId: reading.id, state: "error",
-                                         message: message.message } });
-      }
+      // Failures of a reading arrive as its "state"; these are about a model
+      // or a command, and are shown in the toolbar panel.
+      if (message.engine) engineErrors[message.engine] = message.message;
+      else lastError = message.message;
       break;
     case "levels":
       // the meter's readings: for the page only, many per sentence
@@ -130,11 +142,6 @@ function toTab(message) {
 
 // ── Readings ────────────────────────────────────────────────────────────
 
-function chosenVoice() {
-  const engine = settings.engine ?? (catalog && catalog.defaultEngine);
-  return { engine: settings.engine, voice: engine ? settings.voices[engine] ?? null : null };
-}
-
 async function startReading(message, sender) {
   await settingsLoaded;
   const tabId = sender.tab.id;
@@ -142,41 +149,59 @@ async function startReading(message, sender) {
   if (reading && (reading.tabId !== tabId || reading.frameId !== frameId)) {
     toTab({ type: "ended", readingId: reading.id });
   }
-  const { engine, voice } = chosenVoice();
   reading = { id: ++nextId, tabId, frameId, state: "loading", index: message.startIndex || 0,
-              total: 0, message: null, engineName: null, voiceLabel: null, speed: settings.speed };
-  toHost({ type: "play", text: message.text, readingId: reading.id, engine, voice,
-           speed: settings.speed, startIndex: message.startIndex || 0 });
+              total: 0, message: null, engineName: null, voiceLabel: null, speed: settings.speed,
+              detached: false };
+  // Every engine's chosen voice: the helper may fall back to another engine
+  toHost({ type: "play", text: message.text, readingId: reading.id, engine: settings.engine,
+           voices: settings.voices, speed: settings.speed, startIndex: message.startIndex || 0 });
   broadcast();
   return { readingId: reading.id, speed: settings.speed, hostState: host.state, hostMessage: host.message };
 }
 
+// Pause, resume, skip, stop: things a reading in progress does. They never
+// start the helper on their own -- with it gone there is nothing to control,
+// except a detached reading, which the page restarts.
 function control(action) {
   if (!reading) return;
-  toHost({ type: action });
   if (action === "stop") {
+    if (port) toHost({ type: "stop" });
     reading.state = "stopped";
     broadcast();
+    return;
   }
+  if (!port) {
+    if (reading.detached && reading.state === "paused" && (action === "resume" || action === "toggle")) {
+      toTab({ type: "restart", readingId: reading.id });
+    }
+    return;
+  }
+  toHost({ type: action });
 }
 
 async function saveSettings(change) {
   await settingsLoaded;
-  const before = chosenVoice();
-  if ("engine" in change) settings.engine = change.engine;
+  let voiceChanged = false;
+  if ("engine" in change && change.engine !== settings.engine) {
+    settings.engine = change.engine;
+    voiceChanged = true;
+  }
   if ("voice" in change) {
     const engine = change.engineKey ?? settings.engine ?? (catalog && catalog.defaultEngine);
-    if (engine) settings.voices = { ...settings.voices, [engine]: change.voice };
+    if (engine && settings.voices[engine] !== change.voice) {
+      settings.voices = { ...settings.voices, [engine]: change.voice };
+      voiceChanged = true;
+    }
   }
   if ("speed" in change) settings.speed = Math.min(2, Math.max(0.5, Number(change.speed) || 1.5));
   if ("follow" in change) settings.follow = Boolean(change.follow);
   await api.storage.local.set(settings);
-  const live = reading && ["loading", "playing", "paused"].includes(reading.state);
-  const after = chosenVoice();
-  if (live && (before.engine !== after.engine || before.voice !== after.voice)) {
-    toHost({ type: "voice", engine: after.engine ?? undefined, voice: after.voice ?? undefined });
-  } else if ("engine" in change && !live) {
-    toHost({ type: "preload", engine: after.engine ?? undefined });
+
+  const live = reading && LIVE.includes(reading.state) && port;
+  if (live && voiceChanged) {
+    toHost({ type: "voice", engine: settings.engine ?? undefined, voices: settings.voices });
+  } else if ("engine" in change && voiceChanged && !live) {
+    toHost({ type: "preload", engine: settings.engine ?? undefined, voices: settings.voices });
   }
   if (live && "speed" in change) toHost({ type: "speed", value: settings.speed });
   broadcast();
@@ -199,7 +224,8 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       saveSettings({ follow: message.value });
       return false;
     case "preload":
-      settingsLoaded.then(() => toHost({ type: "preload", engine: settings.engine ?? undefined }));
+      settingsLoaded.then(() => toHost({ type: "preload", engine: settings.engine ?? undefined,
+                                         voices: settings.voices }));
       return false;
     case "page-gone":
       if (fromReadingTab(sender)) {
@@ -227,7 +253,7 @@ api.tabs.onRemoved.addListener((tabId) => {
 // ── The toolbar panel ───────────────────────────────────────────────────
 
 function status() {
-  return { type: "status", host, catalog, settings, reading, lastError };
+  return { type: "status", host, catalog, settings, reading, lastError, engineErrors };
 }
 
 function broadcast() {
@@ -251,10 +277,13 @@ api.runtime.onConnect.addListener((p) => {
     else if (message.type === "reconnect") {
       if (port) port.disconnect();
       port = null;
+      engineErrors = {};
+      lastError = null;
       connect();
     }
   });
   settingsLoaded.then(() => {
+    // The panel lists the voices, which only the helper knows
     if (!port && host.state !== "missing") connect();
     p.postMessage(status());
   });

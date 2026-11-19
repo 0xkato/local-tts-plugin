@@ -5,6 +5,9 @@ Chrome-family browsers to load.
     python -m local_tts_plugin.register install [--extension DIR]   (what install.sh runs)
     python -m local_tts_plugin.register uninstall
     python -m local_tts_plugin.register status
+
+Exit status: 0 all set, 1 something to install still (see the list), 2 usage,
+3 registering failed.
 """
 import base64
 import hashlib
@@ -106,14 +109,19 @@ def _write(path, text, mode=0o644):
 
 
 def copy_extension(source, dest) -> str:
-    """The extension as Chrome and Brave load it: the same files, with the
-    key that pins its ID. Kept outside the repo so it survives the repo moving."""
+    """The extension as Chrome and Brave load it: the same files with the key
+    that pins its ID, and without Firefox's own manifest keys, which Chrome
+    warns about. Kept outside the repo so it survives the repo moving."""
+    if not os.path.isfile(os.path.join(source, "manifest.json")):
+        raise FileNotFoundError(f"no extension at {source}")
     if os.path.isdir(dest):
         shutil.rmtree(dest)
-    shutil.copytree(source, dest)
+    shutil.copytree(source, dest, ignore=shutil.ignore_patterns(".*"))
     path = os.path.join(dest, "manifest.json")
     with open(path, encoding="utf-8") as f:
         manifest = json.load(f)
+    manifest.pop("browser_specific_settings", None)
+    manifest.get("background", {}).pop("scripts", None)
     manifest["key"] = CHROME_KEY
     _write(path, json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
     return dest
@@ -194,7 +202,11 @@ def main(argv=None):
         extension = None
         if argv[:1] == ["--extension"] and len(argv) > 1:
             extension = argv[1]
-        paths = install(extension=extension)
+        try:
+            paths = install(extension=extension)
+        except Exception as exc:
+            print(f"Registering the helper failed: {exc}", file=sys.stderr)
+            return 3
         print("Registered the helper:")
         for name, path in paths.items():
             if name not in ("launcher", "extension"):

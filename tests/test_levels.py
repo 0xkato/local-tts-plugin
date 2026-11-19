@@ -69,3 +69,18 @@ def test_each_clip_sends_its_levels_as_it_starts():
     assert [m["index"] for m in levels] == [0, 1]
     assert all(m["readingId"] == 4 and m["frame"] == FRAME_S for m in levels)
     assert levels[0]["levels"][0] == 0 and max(levels[0]["levels"]) == 100
+
+
+def test_both_channels_of_a_stereo_clip_count(tmp_path):
+    path = tmp_path / "stereo.wav"
+    frames = []
+    for i in range(int(0.4 * RATE)):
+        right = int(0.6 * 32767 * math.sin(2 * math.pi * 220 * i / RATE))
+        frames += [0, right]                      # silent left, tone on the right
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(RATE)
+        w.writeframes(struct.pack(f"<{len(frames)}h", *frames))
+    levels = clip_levels(str(path))
+    assert min(levels[1:-1]) >= 90

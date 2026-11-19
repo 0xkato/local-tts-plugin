@@ -27,8 +27,10 @@ webdriver = pytest.importorskip("selenium.webdriver")
 HOME = os.path.expanduser("~")
 pytestmark = pytest.mark.skipif(not os.access(register.launcher_path(HOME), os.X_OK),
                                 reason="the helper is not installed: run ./install.sh --dev")
+# The helper quits after 4 s with nothing playing, so a pause can outlast it
+IDLE_S = 4
 TEST_ENV = dict(LOCAL_TTS_FAKE_VOICES="1", LOCAL_TTS_PLUGIN_FAKE_PLAYER="0.45",
-                LOCAL_TTS_VOICES_PYTHON=sys.executable)
+                LOCAL_TTS_VOICES_PYTHON=sys.executable, LOCAL_TTS_PLUGIN_IDLE_S=str(IDLE_S))
 
 EXPECTED = [
     "Why it matters",
@@ -262,10 +264,10 @@ def test_follow_along_scrolls_only_while_it_is_on(browser, site):
     assert scroll_y(browser) == 0
 
     # Remembered on the next page; switched back on for the tests after this
-    open_page(browser, f"{site}/long.html?again")
-    toggle = wait_for(lambda: shadow(browser, '.follow[aria-pressed="false"]'))
-    browser.execute_script("arguments[0].click()", toggle)
+    open_page(browser, f"{site}/long.html?again").click()
+    wait_for(lambda: shadow(browser, '.bar.shown .follow[aria-pressed="false"]')).click()
     wait_for(lambda: shadow(browser, '.follow[aria-pressed="true"]'))
+    shadow(browser, ".close").click()
 
 
 METER = """
@@ -294,3 +296,30 @@ def test_the_meter_moves_with_the_sound_and_rests_in_silence(browser, site):
         "return [...document.querySelector('local-tts-ui').shadowRoot"
         ".querySelectorAll('.viz i')].map(b => b.style.height)")
     assert all(h in ("", "22%") for h in resting), resting
+
+
+def test_a_page_cannot_start_a_reading_by_itself(browser, site):
+    """Only your clicks count: a page's own script selecting text and pressing
+    the play button must not make the computer talk."""
+    open_page(browser, f"{site}/article.html?script")
+    browser.execute_script("""
+        const ui = document.querySelector('local-tts-ui');
+        ui.shadowRoot.querySelector('.bubble').click();
+    """)
+    time.sleep(1.5)
+    assert not shadow(browser, ".bar.shown")
+
+
+def test_a_pause_longer_than_the_helper_waits_keeps_the_place(browser, site):
+    open_page(browser, f"{site}/article.html?long-pause").click()
+    wait_for(lambda: "Sentence 3 of 6" in (shadow(browser, ".sub").text or ""))
+    shadow(browser, ".main").click()
+    wait_for(lambda: shadow(browser, '.bar[data-state="paused"]'))
+    held = shadow(browser, ".sub").text
+    time.sleep(IDLE_S + 3)                 # the helper quits to free the model
+    assert shadow(browser, '.bar.shown[data-state="paused"]'), "the reading was thrown away"
+    assert shadow(browser, ".sub").text == held
+    shadow(browser, ".main").click()       # resume: it starts again where it was
+    result = browser.execute_async_script(WATCH, ["finished", "error"])
+    assert result["state"] == "finished", result
+    assert result["seen"][0] == EXPECTED[2] and result["seen"][-1] == EXPECTED[-1], result

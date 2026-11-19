@@ -9,6 +9,8 @@ Extension -> host:
     {"type": "hello"}
     {"type": "play", "text": "...", "readingId": 3, "engine": "kokoro",
      "voice": "af_heart", "speed": 1.5, "startIndex": 0}   all but text optional
+        instead of "voice", "voices" may give the chosen voice of every engine:
+        {"kokoro": "af_bella", "phonon": "Hugh"} -- whichever engine reads
     {"type": "pause" | "resume" | "toggle" | "next" | "prev" | "stop"}
     {"type": "speed", "value": 1.7}
     {"type": "voice", "engine": "kokoro", "voice": "af_bella"}
@@ -32,6 +34,7 @@ import array
 import logging
 import math
 import os
+import queue
 import sys
 import threading
 import time
@@ -108,7 +111,8 @@ def clip_levels(path, frame_s=FRAME_S) -> list:
     step = max(1, int(rate * frame_s)) * channels
     rms = []
     for start in range(0, len(samples), step):
-        chunk = samples[start:start + step:4]      # every 4th sample is plenty for a meter
+        # every 7th sample is plenty for a meter; odd, so stereo counts both channels
+        chunk = samples[start:start + step:7]
         rms.append(math.sqrt(sum(x * x for x in chunk) / len(chunk)) if chunk else 0.0)
     peak = max(rms, default=0.0)
     if peak <= 0:
@@ -164,6 +168,7 @@ class Session:
         self.voice = self.engines[self.engine_key].spec.default_voice if self.engine_key else None
         self.speed = DEFAULT_SPEED
         self._ready = set()          # engines the worker has loaded
+        self._preloading = 0         # a first download can take many minutes
         self._lock = threading.RLock()
         self._restart = None
         self._last_active = clock()
@@ -184,10 +189,15 @@ class Session:
                 command(message)
             except Exception as exc:
                 log.exception("%s failed", kind)
-                self._send({"type": "error", "message": f"{kind} failed: {exc}"})
+                if kind == "play":
+                    # the page waiting on this reading needs to hear it failed
+                    self._send({"type": "state", "readingId": message.get("readingId"),
+                                "state": "error", "message": f"Could not start reading: {exc}"})
+                else:
+                    self._send({"type": "error", "message": f"{kind} failed: {exc}"})
 
     def idle_seconds(self) -> float:
-        if self.controller.state == State.PLAYING:
+        if self.controller.state == State.PLAYING or self._preloading:
             return 0.0
         return max(0.0, self.clock() - self._last_active)
 
@@ -236,7 +246,8 @@ class Session:
         self.reading_id = message.get("readingId")
         if "speed" in message:
             self.speed = clamp_speed(message["speed"])
-        engine, _ = self._select(message.get("engine"), message.get("voice"))
+        engine, _ = self._select(message.get("engine"), message.get("voice"),
+                                 message.get("voices"))
         c.engine = engine
         c.load_text(text)
         if c.total_sentences:
@@ -289,7 +300,11 @@ class Session:
             self._restart_soon()
 
     def _cmd_voice(self, message):
-        engine, changed = self._select(message.get("engine"), message.get("voice"))
+        before = self.voice
+        engine, changed = self._select(message.get("engine"), message.get("voice"),
+                                       message.get("voices"))
+        if not changed and self.voice == before:
+            return
         c = self.controller
         if changed:
             # Clips in the old voice must not be replayed in the new one's place
@@ -302,19 +317,24 @@ class Session:
             self._preload(self.engine_key)
 
     def _cmd_preload(self, message):
-        if message.get("engine") is not None:
-            self._select(message.get("engine"), self.voice)
+        # During a reading its engine stays: switching is what "voice" is for
+        reading = self.controller.state in (State.PLAYING, State.PAUSED)
+        if message.get("engine") is not None and not reading:
+            self._select(message.get("engine"), None, message.get("voices"))
         self._preload(self.engine_key)
 
     # ── internals ───────────────────────────────────────────────────────
 
-    def _select(self, key, voice):
-        """Make an engine and voice current; unknown ones fall back to the defaults."""
+    def _select(self, key, voice, chosen=None):
+        """Make an engine and voice current; unknown ones fall back to the
+        defaults. `chosen` maps engines to the voice picked for each."""
         if key is None:
             key = self.engine_key
         if key not in self.engines:
             key = self.default_engine()
         voices = dict(self.engines[key].spec.voices)
+        if voice is None and isinstance(chosen, dict):
+            voice = chosen.get(key)
         if voice is None and key == self.engine_key and self.voice in voices:
             voice = self.voice            # not asked to change it
         elif voice not in voices:
@@ -389,10 +409,15 @@ class Session:
                 self._send({"type": "error", "engine": key,
                             "message": f"{engine.get_name()} failed to load: {exc}"})
                 return
+            finally:
+                with self._lock:
+                    self._preloading -= 1
+                    self._touch()
             if key == self.engine_key:
                 self._ready.add(key)
             self._send({"type": "ready", "engine": key})
 
+        self._preloading += 1
         threading.Thread(target=work, daemon=True).start()
 
     def _params(self):
@@ -461,24 +486,42 @@ FAKE_SPEC = EngineSpec(
 
 
 class Outbox:
-    """Writes messages to the browser, one whole frame at a time."""
+    """Writes messages to the browser from a thread of its own, so nothing that
+    sends -- the playback thread runs its hooks inside the controller's lock --
+    ever waits on the pipe. Messages leave in the order they were sent."""
 
     def __init__(self, stream):
         self._stream = stream
-        self._lock = threading.Lock()
+        self._queue = queue.SimpleQueue()
         self.closed = False
+        threading.Thread(target=self._write_all, daemon=True).start()
 
     def __call__(self, message):
+        if self.closed:
+            return
         try:
             frame = encode(message)
         except ProtocolError as exc:
             log.error("dropped a message: %s", exc)
             return
-        with self._lock:
+        self._queue.put(frame)
+
+    def drain(self, timeout=2.0) -> bool:
+        """Wait until everything sent so far has been written."""
+        written = threading.Event()
+        self._queue.put(written)
+        return written.wait(timeout) or self.closed
+
+    def _write_all(self):
+        while True:
+            item = self._queue.get()
+            if isinstance(item, threading.Event):
+                item.set()
+                continue
             if self.closed:
-                return
+                continue
             try:
-                self._stream.write(frame)
+                self._stream.write(item)
                 self._stream.flush()
             except (BrokenPipeError, OSError, ValueError):
                 self.closed = True
@@ -590,6 +633,7 @@ def main():
                 break
     finally:
         session.close()
+        send.drain()      # "bye" and anything else still queued
     log.info("host exiting")
 
 

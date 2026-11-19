@@ -1,6 +1,7 @@
 """Registering the host with Firefox."""
 import json
 import os
+import shutil
 import re
 import subprocess
 import sys
@@ -77,13 +78,16 @@ def test_chrome_and_brave_are_registered_only_when_installed(tmp_path):
             f"chrome-extension://{register.CHROME_EXTENSION_ID}/"]
 
 
-def test_the_extension_copy_carries_the_key_and_nothing_else_changes(tmp_path):
+def test_the_extension_copy_carries_the_key_and_drops_firefox_only_parts(tmp_path):
     source = os.path.join(ROOT, "extension")
     paths = register.install(home=str(tmp_path), extension=source)
     copy = paths["extension"]
     original = json.load(open(os.path.join(source, "manifest.json")))
     copied = json.load(open(os.path.join(copy, "manifest.json")))
     assert copied.pop("key") == register.CHROME_KEY
+    # Chrome warns about Firefox's keys, so the copy goes without them
+    del original["browser_specific_settings"]
+    del original["background"]["scripts"]
     assert copied == original
     for name in ("content.js", "background.js", "popup.html", "icons/icon-48.png"):
         assert open(os.path.join(copy, name), "rb").read() == open(os.path.join(source, name), "rb").read()
@@ -98,3 +102,18 @@ def test_uninstall_removes_every_registration_and_the_copy(tmp_path):
     removed = register.uninstall(home=str(tmp_path))
     assert sorted(removed) == sorted(paths.values())
     assert not any(os.path.exists(p) for p in paths.values())
+
+
+def test_hidden_files_stay_out_of_the_copy(tmp_path):
+    source = tmp_path / "ext"
+    shutil.copytree(os.path.join(ROOT, "extension"), source)
+    (source / ".amo-upload-uuid").write_text("{}")
+    copy = register.copy_extension(str(source), str(tmp_path / "copy"))
+    assert not os.path.exists(os.path.join(copy, ".amo-upload-uuid"))
+
+
+def test_a_failed_install_exits_with_an_error_not_a_warning(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    code = register.main(["install", "--extension", str(tmp_path / "no-such-folder")])
+    assert code >= 2
+    assert "failed" in capsys.readouterr().err.lower()

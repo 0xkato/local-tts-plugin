@@ -22,11 +22,13 @@ const STATUS_TEXT = {
   error: "Stopped",
 };
 
+// The engine that will read: the one picked, else the helper's own default,
+// the same fallback the helper makes
 function selectedEngine() {
   const { catalog, settings } = status;
   if (!catalog) return null;
-  const key = settings.engine ?? catalog.defaultEngine;
-  return catalog.engines.find((e) => e.key === key) || catalog.engines[0] || null;
+  const find = (key) => catalog.engines.find((e) => e.key === key);
+  return find(settings.engine) || find(catalog.defaultEngine) || catalog.engines[0] || null;
 }
 
 function render() {
@@ -106,7 +108,12 @@ function renderEngines(catalog, settings) {
 
   note.hidden = true;
   note.className = "note";
-  if (current && !current.available) {
+  const failed = current && status.engineErrors && status.engineErrors[current.key];
+  if (failed) {
+    note.hidden = false;
+    note.classList.add("bad");
+    note.textContent = failed;
+  } else if (current && !current.available) {
     note.hidden = false;
     note.classList.add("bad");
     note.textContent = `${current.name} ${current.reason}`;

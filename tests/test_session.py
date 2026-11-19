@@ -1,4 +1,5 @@
 """The host's reading session: commands from the extension in, events out."""
+import threading
 import time
 
 import pytest
@@ -289,3 +290,67 @@ def test_play_can_start_partway_through(make):
     events.wait_state("finished")
     assert engines["alpha"].said() == ["Third one."]
     assert sentences_heard(events, 1) == [2]
+
+
+# ── Review findings ──────────────────────────────────────────────────────
+
+class SlowClient(FakeClient):
+    def __init__(self):
+        super().__init__()
+        self.release = threading.Event()
+
+    def load(self, key):
+        self.release.wait(5)
+        return super().load(key)
+
+
+def test_a_long_preload_is_not_idle_time(make):
+    """A first download can take many minutes; the host must not quit on it."""
+    session, events, engines, _ = make()
+    slow = SlowClient()
+    session.client = slow
+    for engine in engines.values():
+        engine.client = slow
+    session.clock = lambda: time.monotonic() + 10_000   # long past any idle limit
+    session.handle({"type": "preload", "engine": "beta"})
+    time.sleep(0.2)
+    assert session.idle_seconds() == 0
+    slow.release.set()
+    events.wait_for(lambda m: m["type"] == "ready")
+    assert session.idle_seconds() > 0
+
+
+def test_the_voice_comes_from_the_choices_for_whichever_engine_reads(make):
+    """The extension sends every engine's chosen voice: it may not know which
+    engine the host will fall back to."""
+    session, events, engines, _ = make()
+    session.handle({"type": "play", "text": "One.", "readingId": 1, "engine": "gone",
+                    "voices": {"alpha": "v2", "beta": "v1"}})
+    events.wait_state("finished")
+    assert engines["alpha"].calls[0]["voice"] == "v2"
+
+
+def test_preloading_during_a_reading_does_not_switch_its_engine(make):
+    session, events, engines, client = make(player=FakePlayer(seconds=0.4))
+    session.handle({"type": "play", "text": TEXT, "readingId": 1})
+    events.wait_for(lambda m: m["type"] == "sentence")
+    session.handle({"type": "preload", "engine": "beta"})
+    events.wait_state("finished")
+    assert client.active[-1] == "alpha" and engines["beta"].calls == []
+    assert sentences_heard(events, 1) == [0, 1, 2]
+
+
+def test_a_voice_message_that_changes_nothing_does_not_restart(make):
+    session, events, engines, _ = make(player=FakePlayer(seconds=0.5))
+    session.handle({"type": "play", "text": TEXT, "readingId": 1})
+    events.wait_for(lambda m: m["type"] == "sentence")
+    session.handle({"type": "voice", "engine": "alpha", "voices": {"alpha": "v1"}})
+    events.wait_state("finished")
+    assert sentences_heard(events, 1) == [0, 1, 2]
+
+
+def test_a_play_that_fails_is_reported_against_its_reading(make):
+    session, events, _, _ = make()
+    session.handle({"type": "play", "text": None, "readingId": 12})
+    failed = events.wait_state("error")
+    assert failed["readingId"] == 12 and "text" in failed["message"]
