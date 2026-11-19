@@ -270,19 +270,14 @@
             border-radius: 10px; margin: -4px; padding: 4px; transition: background .15s; }
     .meta:hover { background: rgba(255, 255, 255, .05); }
     .viz { flex: none; width: 18px; height: 18px; display: flex; align-items: flex-end; justify-content: space-between; }
-    .viz i { width: 3px; height: 30%; border-radius: 2px; background: #A9B6FF; transition: height .2s ease; }
-    .bar[data-state="playing"] .viz i { animation: eq 1.1s ease-in-out infinite; }
-    .bar[data-state="playing"] .viz i:nth-child(2) { animation-delay: -.35s; }
-    .bar[data-state="playing"] .viz i:nth-child(3) { animation-delay: -.7s; }
-    .bar[data-state="playing"] .viz i:nth-child(4) { animation-delay: -.2s; }
-    @keyframes eq { 0%, 100% { height: 25%; } 50% { height: 100%; } }
-    .bar[data-state="loading"] .viz i { animation: wait 1s ease-in-out infinite; height: 35%; }
+    .viz i { width: 3px; height: 22%; border-radius: 2px; background: #A9B6FF; }
+    .bar[data-state="loading"] .viz i { animation: wait 1s ease-in-out infinite; }
     .bar[data-state="loading"] .viz i:nth-child(2) { animation-delay: .15s; }
     .bar[data-state="loading"] .viz i:nth-child(3) { animation-delay: .3s; }
     .bar[data-state="loading"] .viz i:nth-child(4) { animation-delay: .45s; }
     @keyframes wait { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }
-    .bar[data-state="error"] .viz i { background: #FF8A93; height: 30%; }
-    .bar[data-state="paused"] .viz i, .bar[data-state="finished"] .viz i { height: 30%; opacity: .7; }
+    .bar[data-state="error"] .viz i { background: #FF8A93; }
+    .bar[data-state="paused"] .viz i, .bar[data-state="finished"] .viz i { opacity: .7; }
 
     .text { min-width: 0; }
     .title { font-weight: 600; letter-spacing: -.005em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -385,7 +380,7 @@
       for (const stale of document.querySelectorAll("local-tts-ui")) stale.remove();
       document.documentElement.append(root);
     };
-    return { root, shadow, bubble, bar, meta, title, sub, prev, main, next, minus, value, plus,
+    return { root, shadow, bubble, bar, bars: [...viz.children], meta, title, sub, prev, main, next, minus, value, plus,
              follow: followButton, close, fill, mount };
   })();
 
@@ -397,6 +392,46 @@
     ui.main.title = labels[kind];
     ui.main.setAttribute("aria-label", labels[kind]);
     ui.main.dataset.kind = kind;
+  }
+
+  // ── The meter ─────────────────────────────────────────────────────────
+  // The bars follow the loudness of the clip being played, which the helper
+  // measures as each one starts (40 ms readings): up on the words, down in the
+  // pauses, still in silence.
+
+  const REST = 22;                      // % of the bar's height when silent
+  const BAR_GAIN = [0.62, 1, 0.84, 0.7];
+  const BAR_LAG = [2, 0, 1, 3];         // readings behind: a ripple, not four copies
+  const meter = { levels: null, frameMs: 40, start: 0, shown: [0, 0, 0, 0], raf: 0 };
+
+  function startMeter(levels, frame) {
+    if (reducedMotion.matches || !Array.isArray(levels) || !levels.length) return;
+    meter.levels = levels;
+    meter.frameMs = (frame || 0.04) * 1000;
+    meter.start = performance.now();
+    if (!meter.raf) meter.raf = requestAnimationFrame(tickMeter);
+  }
+
+  function stopMeter() {
+    meter.levels = null;
+    if (!meter.raf) meter.raf = requestAnimationFrame(tickMeter); // let the bars settle
+  }
+
+  function tickMeter(now) {
+    let moving = false;
+    const reading = (now - meter.start) / meter.frameMs;
+    ui.bars.forEach((bar, i) => {
+      const k = Math.floor(reading) - BAR_LAG[i];
+      const sounding = meter.levels !== null && k < meter.levels.length;
+      const target = sounding && k >= 0 ? (meter.levels[k] / 100) * BAR_GAIN[i] : 0;
+      // Quick to rise, slower to fall, as a real level meter moves
+      let shown = target >= meter.shown[i] ? target : meter.shown[i] * 0.8 + target * 0.2;
+      if (shown < 0.005) shown = 0;
+      meter.shown[i] = shown;
+      bar.style.height = `${REST + Math.round(shown * (100 - REST))}%`;
+      if (sounding || shown > 0) moving = true;
+    });
+    meter.raf = moving ? requestAnimationFrame(tickMeter) : 0;
   }
 
   // ── The bubble beside a selection ─────────────────────────────────────
@@ -562,6 +597,7 @@
   function endReading(delay = 0) {
     clearTimeout(hideTimer);
     const done = () => {
+      stopMeter();
       highlight(null);
       ui.bar.classList.remove("shown");
       current = null;
@@ -589,6 +625,9 @@
         current.total = message.sentences.length;
         render({});
         break;
+      case "levels":
+        startMeter(message.levels, message.frame);
+        break;
       case "sentence":
         current.index = message.index;
         showSentence(message.index);
@@ -601,6 +640,7 @@
           break;
         }
         render({ state: message.state, message: message.message });
+        if (message.state !== "playing") stopMeter();
         if (message.state === "playing" || message.state === "paused") showSentence(current.index);
         if (message.state === "finished") {
           highlight(null);

@@ -234,3 +234,31 @@ def test_follow_along_scrolls_only_while_it_is_on(browser, site):
     toggle = wait_for(lambda: shadow(browser, '.follow[aria-pressed="false"]'))
     browser.execute_script("arguments[0].click()", toggle)
     wait_for(lambda: shadow(browser, '.follow[aria-pressed="true"]'))
+
+
+METER = """
+const done = arguments[arguments.length - 1];
+const bars = document.querySelector("local-tts-ui").shadowRoot.querySelectorAll(".viz i");
+const heights = [];
+const started = Date.now();
+(function poll() {
+  heights.push(parseFloat(bars[1].style.height || "22"));
+  if (Date.now() - started > 1500) return done(heights);
+  setTimeout(poll, 15);
+})();
+"""
+
+
+def test_the_meter_moves_with_the_sound_and_rests_in_silence(browser, site):
+    open_page(browser, f"{site}/article.html?meter").click()
+    wait_for(lambda: "Sentence 2 of 6" in (shadow(browser, ".sub").text or ""))
+    heights = browser.execute_async_script(METER)
+    assert max(heights) >= 80, heights   # the test voice's tone
+    assert min(heights) <= 30, heights   # the silence between sentences
+    shadow(browser, ".main").click()
+    wait_for(lambda: shadow(browser, '.bar[data-state="paused"]'))
+    time.sleep(0.5)
+    resting = browser.execute_script(
+        "return [...document.querySelector('local-tts-ui').shadowRoot"
+        ".querySelectorAll('.viz i')].map(b => b.style.height)")
+    assert all(h in ("", "22%") for h in resting), resting

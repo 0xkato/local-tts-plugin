@@ -97,6 +97,10 @@ function fromHost(message) {
                                          message: message.message } });
       }
       break;
+    case "levels":
+      // the meter's readings: for the page only, many per sentence
+      if (reading && message.readingId === reading.id) toTab({ type: "host", message });
+      return;
     case "reading":
     case "sentence":
     case "state":

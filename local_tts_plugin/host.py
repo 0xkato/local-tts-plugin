@@ -21,16 +21,21 @@ Host -> extension:
     {"type": "sentence", "readingId": 3, "index": 0, "total": 12, ...}
     {"type": "state", "readingId": 3, "state": "playing", "index": 0, "total": 12}
         states: loading, playing, paused, stopped, finished, error (with "message")
+    {"type": "levels", "readingId": 3, "index": 0, "frame": 0.04, "levels": [0, 37, 88, ...]}
+        how loud the clip now starting is, 0-100 per frame, for the page's meter
     {"type": "ready", "engine": "kokoro"}              a preload finished
     {"type": "error", "message": "..."}                a command could not run
     {"type": "heartbeat"}                              Firefox suspends a quiet extension
     {"type": "bye", "reason": "idle"}                  exiting to free the model
 """
+import array
 import logging
+import math
 import os
 import sys
 import threading
 import time
+import wave
 
 from local_tts.engine import (
     PYGAME_AVAILABLE,
@@ -57,6 +62,10 @@ HEARTBEAT_S = float(os.environ.get("LOCAL_TTS_PLUGIN_HEARTBEAT_S", "15"))
 
 SPEED_MIN, SPEED_MAX, DEFAULT_SPEED = 0.5, 2.0, 1.5
 
+# The page's meter: one loudness reading per 40 ms of audio, over a 36 dB range
+FRAME_S = 0.04
+METER_RANGE_DB = 36.0
+
 State = PlaybackController.State
 log = logging.getLogger("local_tts_plugin")
 
@@ -80,6 +89,55 @@ def utf16_positions(text: str, positions) -> list:
     return [[prefix[start], prefix[end]] for start, end in positions]
 
 
+def clip_levels(path, frame_s=FRAME_S) -> list:
+    """How loud a WAV clip is, 0-100 for each frame, relative to its own peak.
+    The audio plays here, not in the page, so the page cannot listen to it:
+    this is what its meter shows instead. [] if the file is not 16-bit PCM."""
+    try:
+        with wave.open(path, "rb") as clip:
+            rate, width, channels = clip.getframerate(), clip.getsampwidth(), clip.getnchannels()
+            raw = clip.readframes(clip.getnframes())
+    except (wave.Error, OSError, EOFError):
+        return []
+    if width != 2 or not raw:
+        return []
+    samples = array.array("h")
+    samples.frombytes(raw[: len(raw) - len(raw) % 2])
+    if sys.byteorder == "big":
+        samples.byteswap()
+    step = max(1, int(rate * frame_s)) * channels
+    rms = []
+    for start in range(0, len(samples), step):
+        chunk = samples[start:start + step:4]      # every 4th sample is plenty for a meter
+        rms.append(math.sqrt(sum(x * x for x in chunk) / len(chunk)) if chunk else 0.0)
+    peak = max(rms, default=0.0)
+    if peak <= 0:
+        return [0] * len(rms)
+    levels = []
+    for value in rms:
+        db = 20 * math.log10(max(value, 1e-9) / peak)
+        levels.append(round(min(1.0, max(0.0, (db + METER_RANGE_DB) / METER_RANGE_DB)) * 100))
+    return levels
+
+
+class _Metered:
+    """The speaker, reporting each clip's loudness the moment it starts."""
+
+    def __init__(self, player, on_play):
+        self._player = player
+        self._on_play = on_play
+
+    def play(self, path):
+        self._on_play(path)
+        self._player.play(path)
+
+    def is_busy(self):
+        return self._player.is_busy()
+
+    def stop(self):
+        self._player.stop()
+
+
 class Session:
     """The reading in progress: its text, voice and speed, and the controller
     playing it. Commands arrive on the reader thread; the controller's hooks
@@ -92,7 +150,8 @@ class Session:
         self.engines = dict(engines)
         self.client = client
         self.clock = clock
-        self.controller = PlaybackController(engine=None, session_store=None, player=player)
+        metered = _Metered(player, self._on_clip) if player is not None else None
+        self.controller = PlaybackController(engine=None, session_store=None, player=metered)
         c = self.controller
         c.params_provider = self._params
         c.on_sentence_start = self._on_sentence
@@ -366,6 +425,11 @@ class Session:
         self._ready.add(self.engine_key)
         self._touch()
         self._sentence_event(index)
+
+    def _on_clip(self, path):
+        self._send({"type": "levels", "readingId": self.reading_id,
+                    "index": self.controller.current_index, "frame": FRAME_S,
+                    "levels": clip_levels(path)})
 
     def _on_generating(self, index):
         if self.engine_key in self._ready:
