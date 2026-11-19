@@ -1,4 +1,4 @@
-# Local TTS for Firefox
+# Local TTS for Firefox, Chrome and Brave
 
 Highlight text on any page, press play, and hear it read by the neural voices
 from [local-tts](https://github.com/0xkato/local-tts) — Kokoro, Phonon or Ming,
@@ -7,7 +7,7 @@ running on your own computer. Nothing is sent anywhere.
 ## How it works
 
 ```
-Firefox extension ──native messaging──▶ helper program ──▶ voice worker
+browser extension ──native messaging──▶ helper program ──▶ voice worker
   play button, control bar,              local-tts engine:     Kokoro / Phonon / Ming
   sentence highlighting                  sentences, playback   (local-tts voices env)
 ```
@@ -47,6 +47,12 @@ For a quick try without signing, load `extension/manifest.json` from
 `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** instead;
 Firefox drops it again when it restarts.
 
+**Chrome or Brave:** open `chrome://extensions` (or `brave://extensions`), turn
+on **Developer mode**, click **Load unpacked** and pick
+`~/.local/share/local-tts-plugin/extension`. That is the copy `install.sh`
+keeps, with a key in its manifest that fixes the extension's ID — Chrome lets
+the helper talk only to an extension it knows by ID.
+
 ## Using it
 
 - **Highlight text** and press the ▶ button that appears beside it — or
@@ -80,10 +86,10 @@ uv venv -p 3.11 .venv && VIRTUAL_ENV=.venv uv pip install -e ".[dev]"
 .venv/bin/python -m pytest tests/
 ```
 
-The helper's tests run it as Firefox does, with a test-tone voice. The browser
-tests (`tests/test_firefox.py`) need `geckodriver` and drive a headless Firefox
-that Selenium downloads into `~/.cache/selenium` — never your installed one,
-since launching that applies any update it has waiting.
+The helper's tests run it as a browser does, with a test-tone voice. The
+browser tests (`tests/test_browsers.py`) drive headless Firefox and Chrome that
+Selenium downloads into `~/.cache/selenium` — never your installed browsers,
+since launching an installed Firefox applies any update it has waiting.
 
 To move to a newer local-tts, change the tag in `pyproject.toml` and run
 `./install.sh` again.

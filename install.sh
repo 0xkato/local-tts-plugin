@@ -23,12 +23,17 @@ else
 fi
 
 echo
-"$env/bin/python" -m local_tts_plugin.register install || true
+"$env/bin/python" -m local_tts_plugin.register install --extension "$here/extension" || true
 
-cat <<NEXT
-
-Now load the extension in Firefox:
-  1. Open about:debugging#/runtime/this-firefox
-  2. Click "Load Temporary Add-on…" and pick
-     $here/extension/manifest.json
-NEXT
+data="$HOME/.local/share/local-tts-plugin"
+echo
+echo "Then add the extension to your browser:"
+if [ -f "$data/local-tts.xpi" ]; then
+  echo "  Firefox         open $data/local-tts.xpi in Firefox and click Add"
+else
+  echo "  Firefox         sign it first with ./sign.sh (see the README), or for a quick try:"
+  echo "                  about:debugging#/runtime/this-firefox > Load Temporary Add-on >"
+  echo "                  $here/extension/manifest.json"
+fi
+echo "  Chrome / Brave  chrome://extensions (brave://extensions) > turn on Developer mode >"
+echo "                  Load unpacked > $data/extension"

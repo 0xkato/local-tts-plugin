@@ -15,7 +15,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def test_install_writes_a_manifest_pointing_at_an_executable_launcher(tmp_path):
     paths = register.install(python="/opt/env with space/bin/python", home=str(tmp_path))
-    manifest = json.loads(open(paths["firefox"]).read())
+    manifest = json.loads(open(paths["Firefox"]).read())
     assert manifest["name"] == register.HOST_NAME
     assert manifest["type"] == "stdio"
     assert manifest["path"] == paths["launcher"] and os.path.isabs(manifest["path"])
@@ -43,7 +43,7 @@ def test_the_launcher_finds_homebrew_with_a_bare_path(tmp_path):
     paths = register.install(home=str(tmp_path))
     env = {"PATH": "/usr/bin:/bin", "HOME": str(tmp_path), "LOCAL_TTS_FAKE_VOICES": "1",
            "LOCAL_TTS_VOICES_PYTHON": sys.executable}
-    proc = subprocess.Popen([paths["launcher"], paths["firefox"], register.EXTENSION_ID],
+    proc = subprocess.Popen([paths["launcher"], paths["Firefox"], register.EXTENSION_ID],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env)
     try:
         proc.stdin.write(encode({"type": "hello"}))
@@ -54,3 +54,47 @@ def test_the_launcher_finds_homebrew_with_a_bare_path(tmp_path):
     finally:
         proc.stdin.close()
         proc.wait(10)
+
+
+def test_the_key_pins_the_chrome_id():
+    """Changing the key changes the ID, and every registration with it."""
+    assert register.chrome_extension_id(register.CHROME_KEY) == "ebmfglpmokmfhiochdngekoiiboggocl"
+    assert register.CHROME_EXTENSION_ID == "ebmfglpmokmfhiochdngekoiiboggocl"
+
+
+def test_chrome_and_brave_are_registered_only_when_installed(tmp_path):
+    profiles = register.chromium_profiles(str(tmp_path))
+    os.makedirs(profiles["Chrome"])
+    assert "Brave" not in register.install(home=str(tmp_path))
+    assert not os.path.exists(os.path.join(profiles["Brave"], "NativeMessagingHosts"))
+    os.makedirs(profiles["Brave"])
+    paths = register.install(home=str(tmp_path))
+    for name in ("Chrome", "Brave"):
+        manifest = json.loads(open(paths[name]).read())
+        assert manifest["name"] == register.HOST_NAME
+        assert manifest["path"] == paths["launcher"]
+        assert manifest["allowed_origins"] == [
+            f"chrome-extension://{register.CHROME_EXTENSION_ID}/"]
+
+
+def test_the_extension_copy_carries_the_key_and_nothing_else_changes(tmp_path):
+    source = os.path.join(ROOT, "extension")
+    paths = register.install(home=str(tmp_path), extension=source)
+    copy = paths["extension"]
+    original = json.load(open(os.path.join(source, "manifest.json")))
+    copied = json.load(open(os.path.join(copy, "manifest.json")))
+    assert copied.pop("key") == register.CHROME_KEY
+    assert copied == original
+    for name in ("content.js", "background.js", "popup.html", "icons/icon-48.png"):
+        assert open(os.path.join(copy, name), "rb").read() == open(os.path.join(source, name), "rb").read()
+    # installing again replaces the copy rather than nesting it
+    register.install(home=str(tmp_path), extension=source)
+    assert not os.path.exists(os.path.join(copy, "extension"))
+
+
+def test_uninstall_removes_every_registration_and_the_copy(tmp_path):
+    os.makedirs(register.chromium_profiles(str(tmp_path))["Brave"])
+    paths = register.install(home=str(tmp_path), extension=os.path.join(ROOT, "extension"))
+    removed = register.uninstall(home=str(tmp_path))
+    assert sorted(removed) == sorted(paths.values())
+    assert not any(os.path.exists(p) for p in paths.values())

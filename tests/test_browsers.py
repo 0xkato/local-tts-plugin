@@ -1,15 +1,16 @@
-"""The extension in a real (headless) Firefox, talking to the installed helper.
+"""The extension in real (headless) browsers -- Firefox and Chrome -- talking
+to the installed helper.
 
-Needs geckodriver and the helper registered (./install.sh --dev while working
-on this repo, so Firefox starts the code here). The helper runs on its test
-voice with a silent player, so nothing plays out loud.
+Needs the helper installed (./install.sh --dev while working on this repo, so
+the browsers start the code here). The browsers are copies of their own that
+Selenium downloads into ~/.cache/selenium, never the installed ones. The
+helper runs on its test voice with a silent player, so nothing plays out loud.
 Screenshots land in $LOCAL_TTS_SHOTS when it is set.
 """
 import functools
 import http.server
 import json
 import os
-import shutil
 import sys
 import threading
 import time
@@ -23,11 +24,11 @@ PAGES = os.path.join(ROOT, "tests", "pages")
 SHOTS = os.environ.get("LOCAL_TTS_SHOTS")
 
 webdriver = pytest.importorskip("selenium.webdriver")
-pytestmark = [
-    pytest.mark.skipif(shutil.which("geckodriver") is None, reason="needs geckodriver"),
-    pytest.mark.skipif(not os.path.exists(register.firefox_manifest_path(os.path.expanduser("~"))),
-                       reason="the helper is not registered: run ./install.sh --dev"),
-]
+HOME = os.path.expanduser("~")
+pytestmark = pytest.mark.skipif(not os.access(register.launcher_path(HOME), os.X_OK),
+                                reason="the helper is not installed: run ./install.sh --dev")
+TEST_ENV = dict(LOCAL_TTS_FAKE_VOICES="1", LOCAL_TTS_PLUGIN_FAKE_PLAYER="0.45",
+                LOCAL_TTS_VOICES_PYTHON=sys.executable)
 
 EXPECTED = [
     "Why it matters",
@@ -77,38 +78,69 @@ def site():
     server.shutdown()
 
 
-def separate_firefox():
-    """A Firefox of the test suite's own, downloaded once into Selenium's cache.
-    Never the installed one: launching that applies any update it has waiting."""
+def separate_browser(name):
+    """A browser of the test suite's own, downloaded once into Selenium's cache.
+    Never the installed one: launching an installed Firefox applies any update
+    it has waiting."""
     import subprocess
     from selenium.webdriver.common.selenium_manager import SeleniumManager
 
     manager = SeleniumManager()._get_binary()
-    out = subprocess.run([str(manager), "--browser", "firefox", "--force-browser-download",
+    out = subprocess.run([str(manager), "--browser", name, "--force-browser-download",
                           "--avoid-stats", "--output", "json"],
                          capture_output=True, text=True, timeout=600)
     result = json.loads(out.stdout)["result"]
-    if not result.get("browser_path"):
-        pytest.skip(f"could not get a separate Firefox: {result}")
-    return result["browser_path"], result.get("driver_path")
+    if not result.get("browser_path") or not result.get("driver_path"):
+        pytest.skip(f"could not get a separate {name}: {result}")
+    return result["browser_path"], result["driver_path"]
 
 
-@pytest.fixture(scope="module")
-def browser():
+def start_firefox(tmp_path_factory):
     from selenium.webdriver.firefox.options import Options
     from selenium.webdriver.firefox.service import Service
 
-    firefox, driver_path = separate_firefox()
+    if not os.path.exists(register.firefox_manifest_path(HOME)):
+        pytest.skip("the helper is not registered with Firefox: run ./install.sh --dev")
+    firefox, driver_path = separate_browser("firefox")
     options = Options()
     options.binary_location = firefox
     options.add_argument("-headless")
-    env = dict(os.environ, LOCAL_TTS_FAKE_VOICES="1", LOCAL_TTS_PLUGIN_FAKE_PLAYER="0.45",
-               LOCAL_TTS_VOICES_PYTHON=sys.executable)
-    driver = webdriver.Firefox(options=options,
-                               service=Service(executable_path=driver_path, env=env))
+    driver = webdriver.Firefox(options=options, service=Service(
+        executable_path=driver_path, env=dict(os.environ, **TEST_ENV)))
+    driver.install_addon(os.path.join(ROOT, "extension"), temporary=True)
+    return driver
+
+
+def start_chrome(tmp_path_factory):
+    """Chrome with the keyed copy of the extension, and the helper registered in
+    a throwaway profile: Chrome reads NativeMessagingHosts/ inside it."""
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+
+    chrome, driver_path = separate_browser("chrome")
+    profile = tmp_path_factory.mktemp("chrome-profile")
+    hosts = profile / "NativeMessagingHosts"
+    hosts.mkdir()
+    (hosts / f"{register.HOST_NAME}.json").write_text(
+        json.dumps(register.chromium_manifest(register.launcher_path(HOME))))
+    extension = register.copy_extension(os.path.join(ROOT, "extension"),
+                                        str(tmp_path_factory.mktemp("chrome-ext") / "extension"))
+    options = Options()
+    options.binary_location = chrome
+    for arg in ("--headless=new", f"--user-data-dir={profile}", f"--load-extension={extension}",
+                "--no-first-run", "--window-size=1280,860"):
+        options.add_argument(arg)
+    options.add_experimental_option("excludeSwitches", ["disable-extensions"])
+    return webdriver.Chrome(options=options, service=Service(
+        executable_path=driver_path, env=dict(os.environ, **TEST_ENV)))
+
+
+@pytest.fixture(scope="module", params=["firefox", "chrome"])
+def browser(request, tmp_path_factory):
+    start = start_firefox if request.param == "firefox" else start_chrome
+    driver = start(tmp_path_factory)
     driver.set_window_size(1280, 860)
     driver.set_script_timeout(40)
-    driver.install_addon(os.path.join(ROOT, "extension"), temporary=True)
     yield driver
     driver.quit()
 
@@ -116,7 +148,7 @@ def browser():
 def shot(driver, name):
     if SHOTS:
         os.makedirs(SHOTS, exist_ok=True)
-        driver.save_screenshot(os.path.join(SHOTS, f"{name}.png"))
+        driver.save_screenshot(os.path.join(SHOTS, f"{driver.name}-{name}.png"))
 
 
 def shadow(driver, selector):
