@@ -30,12 +30,22 @@ cd local-tts-plugin
 ./install.sh
 ```
 
-Then load the extension in Firefox: open `about:debugging#/runtime/this-firefox`,
-click **Load Temporary Add-on…** and pick `extension/manifest.json`.
+Then install the extension in Firefox. It has to be signed by Mozilla to stay
+installed; `./sign.sh` does that as a private, unlisted add-on (nothing is
+published) with an API key from
+[addons.mozilla.org](https://addons.mozilla.org/developers/addon/api/key/):
 
-A temporary add-on is removed when Firefox restarts. To keep it installed,
-sign it as an unlisted (private) add-on with your Mozilla account — free and
-automatic — using `npx web-ext sign --channel=unlisted --source-dir extension`.
+```bash
+WEB_EXT_API_KEY=user:… WEB_EXT_API_SECRET=… ./sign.sh
+```
+
+and open the file it writes, `~/.local/share/local-tts-plugin/local-tts.xpi`, in
+Firefox. Each signed version is final, so raise `version` in
+`extension/manifest.json` before signing changes.
+
+For a quick try without signing, load `extension/manifest.json` from
+`about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** instead;
+Firefox drops it again when it restarts.
 
 ## Using it
 
