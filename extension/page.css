@@ -1,0 +1,5 @@
+/* The sentence being read. Injected by the extension rather than the page,
+   so a page's Content-Security-Policy cannot block it. */
+::highlight(local-tts-sentence) {
+  background-color: rgba(143, 162, 255, 0.32);
+}

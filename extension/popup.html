@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Local TTS</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon.svg" alt="" width="26" height="26">
+    <h1>Local TTS</h1>
+    <span id="status" class="status"><i></i><span>Connecting…</span></span>
+  </header>
+
+  <section id="setup" class="card notice" hidden>
+    <h2>Install the helper</h2>
+    <p>The voices run in a small program on your computer. From the
+      <code>local-tts-plugin</code> folder, run:</p>
+    <pre>./install.sh</pre>
+    <button id="retry" type="button" class="secondary">Check again</button>
+  </section>
+
+  <section id="problem" class="card notice" hidden>
+    <h2>Something went wrong</h2>
+    <p id="problem-text"></p>
+    <button id="restart" type="button" class="secondary">Restart the helper</button>
+  </section>
+
+  <section id="access" class="card notice" hidden>
+    <h2>Allow on all websites</h2>
+    <p>Local TTS needs to see the text you highlight, on any site you read.</p>
+    <button id="grant" type="button">Allow</button>
+  </section>
+
+  <section id="now" class="card now" hidden>
+    <div class="now-top">
+      <div>
+        <div class="label">Now reading</div>
+        <div id="now-text" class="now-text"></div>
+      </div>
+      <div class="transport">
+        <button id="prev" type="button" class="round" aria-label="Previous sentence" title="Previous sentence">
+          <svg viewBox="0 0 24 24"><path fill="currentColor" d="M6.5 5.5c.55 0 1 .45 1 1v11c0 .55-.45 1-1 1s-1-.45-1-1v-11c0-.55.45-1 1-1zm11.9.3a1 1 0 0 1 1.6.8v10.8a1 1 0 0 1-1.6.8l-7.6-5.4a1.1 1.1 0 0 1 0-1.8z"/></svg>
+        </button>
+        <button id="toggle" type="button" class="round main" aria-label="Pause" title="Pause">
+          <svg class="pause" viewBox="0 0 24 24"><path fill="currentColor" d="M7.2 5h2.6c.66 0 1.2.54 1.2 1.2v11.6c0 .66-.54 1.2-1.2 1.2H7.2C6.54 19 6 18.46 6 17.8V6.2C6 5.54 6.54 5 7.2 5zm7 0h2.6c.66 0 1.2.54 1.2 1.2v11.6c0 .66-.54 1.2-1.2 1.2h-2.6c-.66 0-1.2-.54-1.2-1.2V6.2c0-.66.54-1.2 1.2-1.2z"/></svg>
+          <svg class="play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5.6v12.8a1.1 1.1 0 0 0 1.7.93l10-6.4a1.1 1.1 0 0 0 0-1.86l-10-6.4A1.1 1.1 0 0 0 8 5.6z"/></svg>
+        </button>
+        <button id="next" type="button" class="round" aria-label="Next sentence" title="Next sentence">
+          <svg viewBox="0 0 24 24"><path fill="currentColor" d="M17.5 5.5c.55 0 1 .45 1 1v11c0 .55-.45 1-1 1s-1-.45-1-1v-11c0-.55.45-1 1-1zM5.6 5.8A1 1 0 0 0 4 6.6v10.8a1 1 0 0 0 1.6.8l7.6-5.4a1.1 1.1 0 0 0 0-1.8z"/></svg>
+        </button>
+        <button id="stop" type="button" class="round" aria-label="Stop" title="Stop">
+          <svg viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="2.2" fill="currentColor"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="meter"><span id="now-fill"></span></div>
+  </section>
+
+  <section class="card" id="voice-card">
+    <div class="label">Voice</div>
+    <div id="engines" class="engines" role="radiogroup" aria-label="Engine"></div>
+    <label class="row" for="voice">
+      <span>Voice</span>
+      <span class="select"><select id="voice"></select></span>
+    </label>
+    <label class="row" for="speed">
+      <span>Speed</span>
+      <input id="speed" type="range" min="0.5" max="2" step="0.1" value="1.5">
+      <output id="speed-value" for="speed">1.5×</output>
+    </label>
+    <p id="engine-note" class="note" hidden></p>
+  </section>
+
+  <footer>
+    Highlight text on any page and press <span class="chip">▶</span><br>
+    <kbd>⌥</kbd><kbd>⇧</kbd><kbd>R</kbd> read selection &nbsp;·&nbsp; <kbd>⌥</kbd><kbd>⇧</kbd><kbd>P</kbd> pause
+  </footer>
+
+  <script src="popup.js"></script>
+</body>
+</html>

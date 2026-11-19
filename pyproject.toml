@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "local-tts-plugin"
+version = "0.1.0"
+description = "Browser extension helper: reads highlighted text with the local-tts voices."
+requires-python = ">=3.10"
+dependencies = [
+    "local-tts @ git+https://github.com/0xkato/local-tts@v1.0.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "numpy>=1.26", "selenium>=4.20"]
+
+[tool.setuptools]
+packages = ["local_tts_plugin"]
