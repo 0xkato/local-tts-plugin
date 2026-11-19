@@ -165,8 +165,14 @@
     if (["PageUp", "PageDown", "Home", "End", "ArrowUp", "ArrowDown", " "].includes(e.key)) userScrolled();
   }, { capture: true });
 
-  function keepInView(range) {
-    if (!range || Date.now() - lastUserScroll < 4000) return;
+  // Follow along: scroll the page to the sentence being read. A setting,
+  // remembered across pages; while it is on, scrolling yourself still
+  // holds it off for a few seconds.
+  let follow = true;
+
+  function keepInView(range, force = false) {
+    if (!range) return;
+    if (!force && (!follow || Date.now() - lastUserScroll < 4000)) return;
     const rect = range.getBoundingClientRect();
     if (!rect.height) return;
     const bottomLimit = innerHeight - (ui.bar.offsetHeight || 0) - 40;
@@ -183,7 +189,12 @@
     next: "M17.5 5.5c.55 0 1 .45 1 1v11c0 .55-.45 1-1 1s-1-.45-1-1v-11c0-.55.45-1 1-1zM5.6 5.8A1 1 0 0 0 4 6.6v10.8a1 1 0 0 0 1.6.8l7.6-5.4a1.1 1.1 0 0 0 0-1.8z",
     replay: "M12 5a7 7 0 1 1-6.6 4.7 1 1 0 1 1 1.9.66A5 5 0 1 0 12 7h-1.6l1.3 1.3a1 1 0 0 1-1.4 1.4l-3-3a1 1 0 0 1 0-1.4l3-3a1 1 0 1 1 1.4 1.4L10.4 5z",
   };
-  const STROKES = { close: "M7 7l10 10M17 7L7 17", minus: "M7 12h10", plus: "M12 7v10M7 12h10" };
+  const STROKES = {
+    close: "M7 7l10 10M17 7L7 17",
+    minus: "M7 12h10",
+    plus: "M12 7v10M7 12h10",
+    follow: "M12 7.5a4.5 4.5 0 1 0 0 9 4.5 4.5 0 1 0 0-9zM12 3.5v3M12 17.5v3M3.5 12h3M17.5 12h3",
+  };
   const SVG_NS = "http://www.w3.org/2000/svg";
 
   function icon(name) {
@@ -242,7 +253,7 @@
     .bubble svg { width: 16px; height: 16px; margin-left: 2px; }
 
     .bar {
-      position: fixed; right: 20px; bottom: 20px; width: 440px; max-width: calc(100vw - 32px);
+      position: fixed; right: 20px; bottom: 20px; width: 476px; max-width: calc(100vw - 32px);
       display: flex; align-items: center; gap: 6px; padding: 8px 10px 8px 14px;
       border-radius: 18px; overflow: hidden;
       font: 500 13px/1.25 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
@@ -255,7 +266,9 @@
     }
     .bar.shown { opacity: 1; transform: none; pointer-events: auto; }
 
-    .meta { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+    .meta { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; cursor: pointer;
+            border-radius: 10px; margin: -4px; padding: 4px; transition: background .15s; }
+    .meta:hover { background: rgba(255, 255, 255, .05); }
     .viz { flex: none; width: 18px; height: 18px; display: flex; align-items: flex-end; justify-content: space-between; }
     .viz i { width: 3px; height: 30%; border-radius: 2px; background: #A9B6FF; transition: height .2s ease; }
     .bar[data-state="playing"] .viz i { animation: eq 1.1s ease-in-out infinite; }
@@ -297,6 +310,10 @@
     .speed svg { width: 13px; height: 13px; }
     .speed .value { min-width: 34px; text-align: center; font-size: 12px; font-weight: 600;
                     font-variant-numeric: tabular-nums; }
+    .follow { width: 30px; height: 30px; color: #8E95A7; }
+    .follow svg { width: 17px; height: 17px; }
+    .follow[aria-pressed="true"] { color: #B4C0FF; background: rgba(143, 162, 255, .16); }
+    .follow[aria-pressed="true"]:hover { background: rgba(143, 162, 255, .24); }
     .close { width: 28px; height: 28px; color: #8E95A7; }
     .close svg { width: 15px; height: 15px; }
 
@@ -305,7 +322,7 @@
                      background: linear-gradient(90deg, #8FA2FF, #A98BFF); transition: width .35s ease; }
     .bar[data-state="loading"] .progress span { opacity: .55; }
 
-    @media (max-width: 480px) { .bar { right: 16px; left: 16px; width: auto; bottom: 16px; } .speed { display: none; } }
+    @media (max-width: 520px) { .bar { right: 16px; left: 16px; width: auto; bottom: 16px; } .speed { display: none; } }
     @media (prefers-reduced-motion: reduce) {
       .bubble, .bar, .progress span { transition: none; }
       .viz i { animation: none !important; }
@@ -345,12 +362,16 @@
     const minus = button("", "minus", "Slower");
     const value = el("span", "value");
     const plus = button("", "plus", "Faster");
+    const followButton = button("icon follow", "follow", "Follow along");
     const close = button("icon close", "close", "Stop reading");
     const fill = el("span");
+    const meta = el("div", "meta", [viz, el("div", "text", [title, sub])]);
+    meta.title = "Show the sentence being read";
     const bar = el("div", "bar", [
-      el("div", "meta", [viz, el("div", "text", [title, sub])]),
+      meta,
       el("div", "transport", [prev, main, next]),
       el("div", "speed", [minus, value, plus]),
+      followButton,
       close,
       el("div", "progress", [fill]),
     ]);
@@ -359,9 +380,13 @@
     shadow.append(bubble, bar);
 
     const mount = () => {
-      if (!root.isConnected) document.documentElement.append(root);
+      if (root.isConnected) return;
+      // A copy left behind by an earlier version of the extension
+      for (const stale of document.querySelectorAll("local-tts-ui")) stale.remove();
+      document.documentElement.append(root);
     };
-    return { root, shadow, bubble, bar, title, sub, prev, main, next, minus, value, plus, close, fill, mount };
+    return { root, shadow, bubble, bar, meta, title, sub, prev, main, next, minus, value, plus,
+             follow: followButton, close, fill, mount };
   })();
 
   function setMain(kind) {
@@ -396,9 +421,11 @@
 
   function placeBubble() {
     if (!selectionRange) return;
-    const rects = selectionRange.getClientRects();
-    const rect = rects.length ? rects[rects.length - 1] : selectionRange.getBoundingClientRect();
-    if (!rect || (!rect.width && !rect.height) || rect.bottom < 0 || rect.top > innerHeight) {
+    // Beside the last selected line on screen: the selection may run on past
+    // the bottom of the window (Select All on a long article)
+    const rects = [...selectionRange.getClientRects()];
+    const rect = rects.reverse().find((r) => (r.width || r.height) && r.bottom > 0 && r.top < innerHeight);
+    if (!rect) {
       ui.bubble.classList.remove("shown");
       return;
     }
@@ -523,13 +550,13 @@
     ui.fill.style.width = `${Math.round(done * 1000) / 10}%`;
   }
 
-  function showSentence(index) {
+  function showSentence(index, force = false) {
     if (!current || !current.sentences) return;
     const span = current.sentences[index];
     if (!span) return;
     const range = rangeFor(current.doc, span[0], span[1]);
     highlight(range);
-    keepInView(range);
+    keepInView(range, force);
   }
 
   function endReading(delay = 0) {
@@ -591,6 +618,35 @@
     else if (kind === "play") control("resume");
     else if (kind === "replay") read(null, 0, current.doc);
     else if (kind === "retry") read(null, current.index, current.doc);
+  });
+  function showFollow() {
+    ui.follow.setAttribute("aria-pressed", String(follow));
+    const label = follow ? "Following along — click to stop scrolling the page"
+                         : "Not following — click to scroll along with the reading";
+    ui.follow.title = label;
+    ui.follow.setAttribute("aria-label", label);
+  }
+  showFollow();
+
+  function setFollow(on, fromStorage = false) {
+    const turnedOn = on && !follow;
+    follow = on;
+    showFollow();
+    if (turnedOn && current) showSentence(current.index, true);
+    if (!fromStorage) api.runtime.sendMessage({ type: "follow", value: on }).catch(() => {});
+  }
+
+  api.storage.local.get({ follow: true }).then((stored) => {
+    follow = stored.follow !== false;
+    showFollow();
+  }).catch(() => {});
+  api.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && changes.follow) setFollow(changes.follow.newValue !== false, true);
+  });
+
+  ui.follow.addEventListener("click", () => setFollow(!follow));
+  ui.meta.addEventListener("click", () => {
+    if (current) showSentence(current.index, true);
   });
   ui.prev.addEventListener("click", () => control("prev"));
   ui.next.addEventListener("click", () => control("next"));

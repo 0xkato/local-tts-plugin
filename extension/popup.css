@@ -210,6 +210,46 @@ input[type="range"]::-webkit-slider-thumb {
 output { min-width: 34px; text-align: right; color: var(--text); font-weight: 650; font-variant-numeric: tabular-nums; }
 
 .note { margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+.switch-title { display: block; font-weight: 600; }
+.switch-hint { display: block; margin-top: 1px; color: var(--muted); font-size: 11.5px; }
+input[role="switch"] {
+  flex: none;
+  position: relative;
+  width: 34px;
+  height: 20px;
+  margin: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  appearance: none;
+  -moz-appearance: none;
+  cursor: pointer;
+  transition: background 0.18s;
+}
+input[role="switch"]::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  transition: transform 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+input[role="switch"]:checked { background: linear-gradient(135deg, var(--accent), var(--accent-2)); }
+input[role="switch"]:checked::before { transform: translateX(14px); }
 .note.bad { color: var(--bad); }
 
 footer {

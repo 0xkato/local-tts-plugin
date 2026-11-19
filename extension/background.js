@@ -7,7 +7,7 @@
 
 const api = globalThis.browser ?? globalThis.chrome;
 const HOST = "local_tts_plugin";
-const DEFAULTS = { engine: null, voices: {}, speed: 1.5 };
+const DEFAULTS = { engine: null, voices: {}, speed: 1.5, follow: true };
 const MISSING =
   "The Local TTS helper isn't installed. Run ./install.sh in the local-tts-plugin folder, then try again.";
 const CRASHED =
@@ -165,6 +165,7 @@ async function saveSettings(change) {
     if (engine) settings.voices = { ...settings.voices, [engine]: change.voice };
   }
   if ("speed" in change) settings.speed = Math.min(2, Math.max(0.5, Number(change.speed) || 1.5));
+  if ("follow" in change) settings.follow = Boolean(change.follow);
   await api.storage.local.set(settings);
   const live = reading && ["loading", "playing", "paused"].includes(reading.state);
   const after = chosenVoice();
@@ -189,6 +190,9 @@ api.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     case "speed":
       saveSettings({ speed: message.value });
+      return false;
+    case "follow":
+      saveSettings({ follow: message.value });
       return false;
     case "preload":
       settingsLoaded.then(() => toHost({ type: "preload", engine: settings.engine ?? undefined }));

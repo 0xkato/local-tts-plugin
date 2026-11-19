@@ -54,6 +54,7 @@ function render() {
   }
 
   renderEngines(catalog, settings);
+  if (document.activeElement !== $("follow")) $("follow").checked = settings.follow !== false;
   const speed = Number(settings.speed) || 1.5;
   if (document.activeElement !== $("speed")) $("speed").value = String(speed);
   $("speed-value").textContent = `${speed.toFixed(1)}×`;
@@ -127,6 +128,9 @@ $("speed").addEventListener("input", (e) => {
 });
 $("speed").addEventListener("change", (e) => {
   port.postMessage({ type: "settings", speed: Number(e.target.value) });
+});
+$("follow").addEventListener("change", (e) => {
+  port.postMessage({ type: "settings", follow: e.target.checked });
 });
 for (const [id, action] of [["prev", "prev"], ["next", "next"], ["stop", "stop"]]) {
   $(id).addEventListener("click", () => port.postMessage({ type: "control", action }));

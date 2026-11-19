@@ -43,8 +43,10 @@ automatic — using `npx web-ext sign --channel=unlisted --source-dir extension`
   right-click → *Read aloud*, or press <kbd>⌥ Option</kbd> <kbd>⇧ Shift</kbd> <kbd>R</kbd>.
 - The **control bar** in the corner has pause, previous / next sentence, speed
   and stop. <kbd>⌥ Option</kbd> <kbd>⇧ Shift</kbd> <kbd>P</kbd> pauses from anywhere.
-- The sentence being read is **highlighted on the page**, which scrolls along
-  unless you are scrolling yourself.
+- The sentence being read is **highlighted on the page**. With **Follow along**
+  on, the page scrolls with the reading; switch it off with the target button
+  on the bar (or in the toolbar panel) to look around freely. Clicking the
+  bar's title jumps to the sentence being read either way.
 - The **toolbar button** picks the engine, voice and speed (Kokoro with Heart
   by default) and controls the reading from any tab.
 - It keeps reading when you switch tabs, and stops when you close the page.

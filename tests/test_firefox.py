@@ -208,3 +208,29 @@ def test_it_works_and_looks_right_under_a_strict_csp(browser, site):
     assert result["state"] == "finished", result
     assert result["seen"] == EXPECTED
 
+
+
+def scroll_y(driver):
+    return driver.execute_script("return Math.round(scrollY)")
+
+
+def test_follow_along_scrolls_only_while_it_is_on(browser, site):
+    # On, the default: the page comes along to the sentence far below
+    open_page(browser, f"{site}/long.html?on").click()
+    result = browser.execute_async_script(WATCH, ["finished", "error"])
+    assert result["state"] == "finished", result
+    wait_for(lambda: scroll_y(browser) > 1500)
+
+    # Off: the page stays where the reader left it
+    open_page(browser, f"{site}/long.html?off").click()
+    wait_for(lambda: shadow(browser, ".bar.shown .follow")).click()
+    wait_for(lambda: shadow(browser, '.follow[aria-pressed="false"]'))
+    result = browser.execute_async_script(WATCH, ["finished", "error"])
+    assert result["state"] == "finished", result
+    assert scroll_y(browser) == 0
+
+    # Remembered on the next page; switched back on for the tests after this
+    open_page(browser, f"{site}/long.html?again")
+    toggle = wait_for(lambda: shadow(browser, '.follow[aria-pressed="false"]'))
+    browser.execute_script("arguments[0].click()", toggle)
+    wait_for(lambda: shadow(browser, '.follow[aria-pressed="true"]'))
